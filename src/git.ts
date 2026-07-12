@@ -2,7 +2,7 @@ import { execSync } from "node:child_process"
 
 export function isGitRepo():boolean{
   try {
-    execSync("igit rev-parse --is-inside-work-tree", { stdio: "ignore" });
+    execSync("git rev-parse --is-inside-work-tree", { stdio: "ignore" });
   return true;
   } catch (error) {
    return false 

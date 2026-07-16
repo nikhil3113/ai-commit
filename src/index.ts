@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Config, conifPath, loadConfig, saveConfig } from "./config.js"
 import * as p from "@clack/prompts"
 import { generateCommitMessage, ProviderName, PROVIDERS } from "./providers.js"
@@ -5,7 +6,7 @@ import { mkdtempDisposable } from "node:fs/promises"
 import { commit, getStagedDiff, isGitRepo } from "./git.js"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { unlinkSync, writeFileSync } from "node:fs"
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { execSync } from "node:child_process"
 
 function parseArgs(argv:string[]){
@@ -170,7 +171,7 @@ async function main(){
     writeFileSync(tmpFile, message);
     const editor = process.env.EDITOR || "nano";
     execSync(`${editor} ${tmpFile}`, { stdio: "inherit" });
-    const edited = execSync(`cat ${tmpFile}`, { encoding: "utf8" });
+    const edited = readFileSync(tmpFile, "utf8");
     unlinkSync(tmpFile);
     commit(edited);
   } else {

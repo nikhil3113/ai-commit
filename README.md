@@ -41,7 +41,7 @@ node dist/index.js config       # re-run setup / change provider
 ## Publish as `npx ai-commit`
 
 ```
-npm publish        # then anywhere: npx ai-commit
+npm publish        # then anywhere: npx @nikhil3113/ai-commit
 ```
 or run locally without publishing:
 ```

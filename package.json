@@ -1,16 +1,44 @@
 {
-  "name": "ai-commit",
+  "name": "@nikhil_31/ai-commit",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Generate git commit messages from your staged diff using the AI provider of your choice (OpenRouter, Groq, Gemini, Ollama, or any OpenAI-compatible endpoint).",
+  "main": "dist/index.js",
+  "bin": {
+    "ai-commit": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "dev": "tsc && node dist/index.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "llm",
+    "openai",
+    "openrouter",
+    "groq",
+    "gemini",
+    "ollama",
+    "cli"
+  ],
+  "author": "nikhil3113",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikhil3113/ai-commit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nikhil3113/ai-commit/issues"
+  },
+  "homepage": "https://github.com/nikhil3113/ai-commit#readme",
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.1.1"

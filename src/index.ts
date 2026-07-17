@@ -167,14 +167,17 @@ async function main(){
   }
 
   if(action === "edit"){
-    const tmpFile = join(tmpdir(), `ai-commit-msg-${Date.now()}.txt`);
-    writeFileSync(tmpFile, message);
-    const editor = process.env.EDITOR || "nano";
-    execSync(`${editor} ${tmpFile}`, { stdio: "inherit" });
-    const edited = readFileSync(tmpFile, "utf8");
-    unlinkSync(tmpFile);
-    commit(edited);
-  } else {
+  const edited = await p.text({
+    message: "Edit the commit message:",
+    initialValue: message,
+    validate: (v) => v?.trim().length === 0 ? "Message cannot be empty" : undefined,
+  })
+  if(p.isCancel(edited)){
+    p.cancel("Commit cancelled.")
+    process.exit(1)
+  }
+  commit(edited)
+}else {
     commit(message);
   }
 

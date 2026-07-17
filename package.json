@@ -1,6 +1,6 @@
 {
   "name": "@nikhil_31/ai-commit",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Generate git commit messages from your staged diff using the AI provider of your choice (OpenRouter, Groq, Gemini, Ollama, or any OpenAI-compatible endpoint).",
   "main": "dist/index.js",
   "bin": {
@@ -26,7 +26,7 @@
     "ollama",
     "cli"
   ],
-  "author": "nikhil3113",
+  "author": "nikhil31",
   "license": "ISC",
   "repository": {
     "type": "git",

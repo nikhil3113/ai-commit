@@ -54,11 +54,13 @@ export const PROVIDERS: Record<ProviderName, ProviderInfo> = {
 
 const SYSTEM_PROMPT =
   "You are a git commit message generator. Given a git diff, output ONLY a " +
-  "conventional-commit-style commit message: a concise summary line (max 72 " +
-  "chars, imperative mood, e.g. 'fix: handle null user on login'), then a " +
-  "blank line, then 2-5 short bullet points of the key changes if helpful. " +
-  "Do not include any preamble, explanation, or markdown code fences — output " +
-  "only the raw commit message text.";
+  "SINGLE-LINE conventional-commit-style message in the format " +
+  "'<type>: <subject>', where <type> is one of: feat, fix, docs, style, " +
+  "refactor, perf, test, build, ci, chore, or revert. The subject must be " +
+  "concise (max 72 chars), in imperative mood, and lowercase (e.g. " +
+  "'fix: handle null user on login'). Do not include a body, bullet points, " +
+  "preamble, explanation, or markdown code fences — output only the single " +
+  "raw commit message line.";
  
 function userPrompt(diff: string): string {
   return `Here is the staged git diff:\n\n${diff.slice(0, 12000)}`;

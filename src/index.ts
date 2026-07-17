@@ -2,12 +2,7 @@
 import { Config, conifPath, loadConfig, saveConfig } from "./config.js"
 import * as p from "@clack/prompts"
 import { generateCommitMessage, ProviderName, PROVIDERS } from "./providers.js"
-import { mkdtempDisposable } from "node:fs/promises"
 import { commit, getStagedDiff, isGitRepo } from "./git.js"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs"
-import { execSync } from "node:child_process"
 
 function parseArgs(argv:string[]){
   const args = {autoYes:false, model:undefined as string | undefined, command: undefined as string | undefined}
@@ -95,6 +90,110 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
   return config
 }
 
+type CancelToken = { cancelled: boolean }
+
+async function editInTerminal(initial: string, onCancel: CancelToken): Promise<string> {
+  process.stdin.setRawMode?.(true)
+  process.stdin.resume()
+
+  const lines: string[] = initial.split("\n")
+  let row = 0
+  let col = lines[0].length
+
+  const render = () => {
+    process.stdout.write("\x1b[2J\x1b[H")
+    process.stdout.write("\x1b[36mEdit message — Enter: new line · Esc: confirm · Ctrl+C: cancel\x1b[0m\n\n")
+    for (let i = 0; i < lines.length; i++) {
+      if (i === row) {
+        const before = lines[i].slice(0, col)
+        const at = lines[i][col] ?? " "
+        const after = lines[i].slice(col + 1)
+        process.stdout.write(`\x1b[7m${at}\x1b[0m${before}${after}\n`)
+      } else {
+        process.stdout.write(lines[i] + "\n")
+      }
+    }
+    if (row === lines.length) {
+      process.stdout.write("\x1b[7m \x1b[0m\n")
+    }
+  }
+
+  render()
+
+  return new Promise<string>((resolve, reject) => {
+    const onData = (buf: Buffer) => {
+      const key = buf.toString("utf8")
+      const code = buf[0]
+
+      if (code === 3) {
+        process.stdin.setRawMode?.(false)
+        process.stdin.removeListener("data", onData)
+        onCancel.cancelled = true
+        reject(new Error("__cancel__"))
+        return
+      }
+
+      if (code === 27 && buf.length > 1 && buf[1] === 91) {
+        const seq = buf[2]
+        if (seq === 65) {
+          if (row > 0) { row--; col = Math.min(col, lines[row].length) }
+        } else if (seq === 66) {
+          if (row < lines.length) { row++; col = Math.min(col, lines[row].length) }
+        } else if (seq === 67) {
+          if (col < lines[row].length) col++
+        } else if (seq === 68) {
+          if (col > 0) col--
+        } else if (seq === 72) {
+          col = 0
+        } else if (seq === 70) {
+          col = lines[row].length
+        }
+        render()
+        return
+      }
+
+      if (code === 27) {
+        process.stdin.setRawMode?.(false)
+        process.stdin.removeListener("data", onData)
+        resolve(lines.join("\n"))
+        return
+      }
+
+      if (code === 13 || code === 10) {
+        const rest = lines[row].slice(col)
+        lines[row] = lines[row].slice(0, col)
+        lines.splice(row + 1, 0, rest)
+        row++
+        col = 0
+        render()
+        return
+      }
+
+      if (code === 127 || code === 8) {
+        if (col > 0) {
+          lines[row] = lines[row].slice(0, col - 1) + lines[row].slice(col)
+          col--
+        } else if (row > 0) {
+          col = lines[row - 1].length
+          lines[row - 1] = lines[row - 1] + lines[row]
+          lines.splice(row, 1)
+          row--
+        }
+        render()
+        return
+      }
+
+      if (code < 32) return
+
+      lines[row] = lines[row].slice(0, col) + key + lines[row].slice(col)
+      col += key.length
+      render()
+    }
+
+    process.stdin.on("data", onData)
+  })
+}
+
 async function main(){
   const {autoYes, model:modelOverride, command} = parseArgs(process.argv.slice(2))
   
@@ -167,17 +266,24 @@ async function main(){
   }
 
   if(action === "edit"){
-  const edited = await p.text({
-    message: "Edit the commit message:",
-    initialValue: message,
-    validate: (v) => v?.trim().length === 0 ? "Message cannot be empty" : undefined,
-  })
-  if(p.isCancel(edited)){
-    p.cancel("Commit cancelled.")
-    process.exit(1)
-  }
-  commit(edited)
-}else {
+    const cancelToken: CancelToken = { cancelled: false }
+    let edited: string
+    try {
+      edited = await editInTerminal(message, cancelToken)
+    } catch (err) {
+      if ((err as Error).message === "__cancel__") {
+        p.cancel("Edit cancelled.")
+        process.exit(1)
+      }
+      throw err
+    }
+    if (edited.trim().length === 0) {
+      p.log.error("Commit message cannot be empty. Committing with original message.")
+      commit(message)
+    } else {
+      commit(edited)
+    }
+  } else {
     commit(message);
   }
 

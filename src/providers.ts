@@ -128,12 +128,22 @@ export async function generateCommitMessage(config: Config, diff:string): Promis
     return callGemini(config.apiKey, model, diff)
   }
 
-  const baseUrl= config.baseUrl || info.defaultModel
+  const baseUrl= config.baseUrl || info.defaultBaseUrl
   if(!baseUrl) throw new Error(`Base URL is required for provider ${config.provider}`)
 
   return callOpenAiCompatible(baseUrl, config.apiKey, model, diff)
 }
 
+export function buildFallbackConfig(primary:Config): Config{
+  if(!primary.fallback) throw new Error("No fallback config defined")
+  const info = PROVIDERS[primary.fallback.provider]
+  return{
+    provider: primary.fallback.provider,
+    apiKey: primary.fallback.apiKey ?? primary.apiKey,
+    model: primary.fallback.model || info.defaultModel,
+    baseUrl: primary.fallback.baseUrl || info.defaultBaseUrl
+  }
+}
 
 
 

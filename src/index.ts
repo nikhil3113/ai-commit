@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-import { Config, conifPath, loadConfig, saveConfig } from "./config.js"
+import { Config, conifPath, FallbackConfig, loadConfig, saveConfig } from "./config.js"
 import * as p from "@clack/prompts"
-import { generateCommitMessage, ProviderName, PROVIDERS } from "./providers.js"
+import { buildFallbackConfig, generateCommitMessage, ProviderName, PROVIDERS } from "./providers.js"
 import { commit, getStagedDiff, isGitRepo } from "./git.js"
+import { argv } from "node:process"
 
 function parseArgs(argv:string[]){
-  const args = {autoYes:false, model:undefined as string | undefined, command: undefined as string | undefined}
+  const args = {autoYes:false, model:undefined as string | undefined, command: undefined as string | undefined, fallbackSetup:false}
 
   for(let i=0; i<argv.length; i++){
     const a = argv[i]
     if(a =="-y" || a=="--yes") args.autoYes = true
     else if(a == "-m" || a == "--model") args.model = argv[++i]
+    else if(a==="--fallback-model") args.fallbackSetup = true
     else if (a== "config" || a=="-h" || a=="--help") args.command = a
+
   }
 
   return args
@@ -77,7 +80,7 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
     baseUrl = url;
   }
 
-  const config: Config = {
+  let config: Config = {
     provider,
     apiKey,
     model: (model as string) || info.defaultModel,
@@ -85,13 +88,86 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
   }
 
   saveConfig(config)
+
+
+  const useFallback = await p.confirm({
+    message: "Configure a fallback provider for when the primary fails?",
+    initialValue: !!existing?.fallback,
+  })
+
+  if (!p.isCancel(useFallback) && useFallback) {
+    const fallback = await runFallbackWizard(config)
+    if (fallback) {
+      config = {...config, fallback}
+      saveConfig(config)
+    }
+  }
   p.outro("Configuration saved to " + conifPath())
 
   return config
 }
 
+async function runFallbackWizard(primary:Config): Promise<FallbackConfig|null>{
+  const provider = (await p.select({
+    message: "Which AI provider do you want to use for fallback?",
+    initialValue: primary.provider,
+    options: (Object.keys(PROVIDERS) as ProviderName[]).map((key) => ({
+      value: key,
+      label: PROVIDERS[key].label,
+      hint: PROVIDERS[key].hint,
+    })),
+  })) as ProviderName
+
+    if(p.isCancel(provider)) return null
+    
+    const info = PROVIDERS[provider]
+  let apiKey:string | undefined;
+
+  if(info.needsApiKey){
+    const sameProvider = provider === primary.provider
+    const key = await p.password({
+     message: sameProvider
+        ? `Enter your API key for fallback ${info.label} (leave empty to reuse primary key):`
+        : `Enter your API key for fallback ${info.label}:`,          validate:(v) =>{
+        if(!v?.trim() && !sameProvider && info.needsApiKey){
+          return "API key cannot be empty for this provider"
+        }
+        return undefined
+      },
+    })
+    if(p.isCancel(key)) return null
+    apiKey = key?.trim() || (sameProvider? primary.apiKey : undefined)
+
+  }
+
+  const model = await p.text({
+    message: `Enter model to use for ${info.label}`,
+    placeholder: info.defaultModel || "e.g. llama-3.1-8b-instant",
+    defaultValue: info.defaultModel,
+  })
+    if(p.isCancel(model)) return null
+
+  let baseUrl: string | undefined = info.defaultBaseUrl
+  if(provider === "custom"){
+    const url = await p.text({
+      message: "Base URL for your OpenAI-compatible endpoint",
+      placeholder: "https://api.example.com/v1",
+      validate: (v) => (v?.trim().length === 0 ? "Base URL can't be empty" : undefined),
+    })
+    if(p.isCancel(url)) return null
+    baseUrl = url as string
+  }
+
+  return {
+    provider,
+    apiKey,
+    model: (model as string) || info.defaultModel,
+    baseUrl
+  }
+}
+
 async function main(){
-  const {autoYes, model:modelOverride, command} = parseArgs(process.argv.slice(2))
+  const {autoYes, model:modelOverride, command,fallbackSetup} = parseArgs(process.argv.slice(2))
   
   if (command === "-h" || command === "--help") {
     console.log(`Usage: ai-commit [-y] [-m <model>]
@@ -116,6 +192,19 @@ async function main(){
     p.log.error("Not a git repository. Please run this command inside a git repo.")
     process.exit(1)
   }
+  
+  if(fallbackSetup){
+    p.intro("Setting up fallback provider...")
+    const fallback = await runFallbackWizard(config)
+    if(fallback){
+      config = {...config, fallback}
+      saveConfig(config)
+      p.outro("Fallback configuration saved to " + conifPath())
+    }else{
+      p.outro("Fallback configuration cancelled.")
+    }
+    return
+  }
 
   const diff = getStagedDiff()
   if(!diff.trim()){
@@ -127,15 +216,21 @@ async function main(){
   const s = p.spinner()
   s.start(`Generating commit message with ${config.provider}/${config.model}`);
 
-  let message:string
-  try {
-    message = await generateCommitMessage(config, diff)
-  } catch (error) {
-    s.stop("Failed to generate commit message: " + (error as Error).message)
-    p.log.error("Error details: " + (error as Error).stack)
-    p.outro("You can run 'ai-commit config' to reconfigure your provider and API key.")
-    process.exit(1)
+  let message: string;
+try {
+  message = await generateCommitMessage(config, diff);
+} catch (error) {
+  if (config.fallback) {
+    s.stop(`Primary provider ${PROVIDERS[config.provider].label} failed, trying fallback...`);
+    message = await generateCommitMessage(buildFallbackConfig(config), diff);
+    s.stop("Commit message generated using fallback provider.");
+  } else {
+    s.stop("Failed to generate commit message: " + (error as Error).message);
+    p.log.error("Error details: " + (error as Error).stack);
+    p.outro("You can run 'ai-commit config' to reconfigure your provider and API key.");
+    process.exit(1);
   }
+}
 
   s.stop("Commit message generated successfully.")
 

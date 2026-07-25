@@ -4,12 +4,20 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ProviderName } from "./providers.js";
 
+export interface FallbackConfig{
+  provider: ProviderName;
+  apiKey?:string;
+  model:string;
+  baseUrl?:string
+}
 export interface Config{
   provider: ProviderName;
   apiKey?:string;
   model:string
   baseUrl?:string
+  fallback?:FallbackConfig
 }
+
 
 const CONFIG_DIR = join(homedir(), ".ai-commit")
 const CONFIG_FILE = join(CONFIG_DIR, "config.json")

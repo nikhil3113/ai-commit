@@ -45,3 +45,8 @@ export function saveConfig(config:Config):void{
 export function conifPath():string{
   return CONFIG_FILE
 }
+
+export function maskApiKey(key: string): string {
+  if (key.length <= 8) return '\u2022'.repeat(key.length)
+  return key.slice(0, 4) + '\u2022\u2022\u2022\u2022' + key.slice(-4)
+}

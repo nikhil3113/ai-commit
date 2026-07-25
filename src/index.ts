@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { Config, conifPath, FallbackConfig, loadConfig, saveConfig } from "./config.js"
+import { Config, conifPath, FallbackConfig, loadConfig, maskApiKey, saveConfig } from "./config.js"
 import * as p from "@clack/prompts"
 import { buildFallbackConfig, generateCommitMessage, ProviderName, PROVIDERS } from "./providers.js"
 import { commit, getStagedDiff, isGitRepo } from "./git.js"
-import { argv } from "node:process"
+
 
 function parseArgs(argv:string[]){
   const args = {autoYes:false, model:undefined as string | undefined, command: undefined as string | undefined, fallbackSetup:false}
@@ -22,8 +22,22 @@ function parseArgs(argv:string[]){
 
 async function runConfigWizard(existing:Config | null): Promise<Config>{
   p.intro("Welcome to ai-commit configuration wizard!")
-
- const provider = (await p.select({
+ 
+  if(existing){
+    const lines:string[] = [
+      `Provider: ${PROVIDERS[existing.provider].label}`,
+      `Model: ${existing.model || PROVIDERS[existing.provider].defaultModel}`,
+    ]
+    if(existing.apiKey) lines.push(`API Key: ${maskApiKey(existing.apiKey)}`)
+    if(existing.baseUrl) lines.push(`Base URL: ${existing.baseUrl}`)
+    if(existing.fallback){
+      const f = existing.fallback
+      lines.push(`Fallback:  ${PROVIDERS[f.provider].label} \u2192 ${f.model}`)
+    }
+    p.note(lines.join("\n"), "Current Configuration")
+    }
+  
+  const provider = (await p.select({
     message: "Which AI provider do you want to use?",
     initialValue: existing?.provider,
     options: (Object.keys(PROVIDERS) as ProviderName[]).map((key) => ({
@@ -41,18 +55,26 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
   const info = PROVIDERS[provider]
   let apiKey:string | undefined;
 
-  if(info.needsApiKey){
-    const keyHint = info.keyUrl? `(get your key here: ${info.keyUrl})` : ""
+  if (info.needsApiKey) {
+    const hasExistingKey = !!existing?.apiKey
+    if (hasExistingKey) {
+      p.log.step(`Current API key: ${maskApiKey(existing.apiKey!)}`)
+    }
+    const keyHint = info.keyUrl ? `(get your key here: ${info.keyUrl})` : ""
     const key = await p.password({
-      message: `Enter your API key ${keyHint}:`,
-      validate: (v) => (v?.trim().length === 0?"API key cannot be empty":""),
+      message: hasExistingKey
+        ? `Enter API key (leave empty to keep current) ${keyHint}`
+        : `Enter your API key ${keyHint}:`,
+      validate: (v) => {
+        if (!v?.trim() && !hasExistingKey) return "API key cannot be empty"
+        return undefined
+      },
     })
-
-    if(p.isCancel(key)){
+    if (p.isCancel(key)) {
       p.cancel("Configuration cancelled.")
       process.exit(1)
     }
-    apiKey = key
+    apiKey = key?.trim() || existing?.apiKey || undefined
   }
 
   const model = await p.text({
@@ -71,6 +93,7 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
     const url = await p.text({
       message: "Base URL for your OpenAI-compatible endpoint",
       placeholder: "https://api.example.com/v1",
+      initialValue: existing?.provider === "custom" ? existing?.baseUrl: undefined,
       validate: (v) => (v?.trim().length === 0 ? "Base URL can't be empty" : undefined),
     });
     if (p.isCancel(url)) {
@@ -125,18 +148,21 @@ async function runFallbackWizard(primary:Config): Promise<FallbackConfig|null>{
 
   if(info.needsApiKey){
     const sameProvider = provider === primary.provider
+    const existingKey = sameProvider ? primary.apiKey : undefined
+
+    if(existingKey) {
+      p.log.step(`Current API key for ${info.label}: ${maskApiKey(existingKey)}`)
+    }
     const key = await p.password({
-     message: sameProvider
-        ? `Enter your API key for fallback ${info.label} (leave empty to reuse primary key):`
-        : `Enter your API key for fallback ${info.label}:`,          validate:(v) =>{
-        if(!v?.trim() && !sameProvider && info.needsApiKey){
-          return "API key cannot be empty for this provider"
-        }
+     message: existingKey
+        ? `Enter API key (leave empty to keep current):`
+        : `Enter your API key for fallback ${info.label}:`,
+      validate: (v) => {
+        if (!v?.trim() && !existingKey) return "API key cannot be empty for this provider"
         return undefined
-      },
-    })
+      },    })
     if(p.isCancel(key)) return null
-    apiKey = key?.trim() || (sameProvider? primary.apiKey : undefined)
+    apiKey = key?.trim() || existingKey || undefined
 
   }
 
@@ -170,13 +196,13 @@ async function main(){
   const {autoYes, model:modelOverride, command,fallbackSetup} = parseArgs(process.argv.slice(2))
   
   if (command === "-h" || command === "--help") {
-    console.log(`Usage: ai-commit [-y] [-m <model>]
+    console.log(`Usage: ai-commit [-y] [-m <model>] [--fallback-model]
        ai-commit config     run the provider/API key setup wizard
- 
+
   -y, --yes           commit automatically, no confirmation prompt
   -m, --model <name>  override the model for this run only
-`);
-    return
+  --fallback-model    configure a fallback AI provider
+`);    return
   }
 
   let config = loadConfig()

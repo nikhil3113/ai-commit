@@ -74,15 +74,39 @@ export const PROVIDERS: Record<ProviderName, ProviderInfo> = {
   },
 };
 
-const SYSTEM_PROMPT =
-  "You are a git commit message generator. Given a git diff, output ONLY a " +
-  "SINGLE-LINE conventional-commit-style message in the format " +
-  "'<type>: <subject>', where <type> is one of: feat, fix, docs, style, " +
-  "refactor, perf, test, build, ci, chore, or revert. The subject must be " +
-  "concise (max 72 chars), in imperative mood, and lowercase (e.g. " +
-  "'fix: handle null user on login'). Do not include a body, bullet points, " +
-  "preamble, explanation, or markdown code fences — output only the single " +
-  "raw commit message line.";
+const SYSTEM_PROMPT = `You are a git commit message generator. Given a staged git diff, write a conventional commit message in exactly this format:
+
+<type>(<scope>): <subject>
+- <change 1>
+- <change 2>
+
+Rules:
+- <type> is one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
+- <scope> is the module or feature area that was changed, inferred from the file paths in the diff (e.g. "ppc" for src/modules/ppc/..., "auth" for src/auth/...). Use a short lowercase name. If the changes span several unrelated areas or no clear module exists, leave out the scope and its parentheses.
+- <subject> is lowercase, imperative mood, no trailing period, and at most 72 characters for the whole first line.
+- Put the bullet list on the line right after the subject, with no blank line between them.
+- Each bullet is one complete sentence, starting with a capital letter in imperative mood ("Add", "Show", "Move", "Type") and ending with a period. Say what changed and why it matters, and name concrete things (functions, endpoints, fields, UI text) where it helps.
+- Wrap bullet lines at about 72 characters. Indent continuation lines with two spaces so they line up under the bullet text.
+- Use 1 to 5 bullets. Group related small changes into one bullet. For a trivial change, a single bullet is fine.
+- Output only the raw commit message. No preamble, explanation, quotes, or markdown code fences.
+
+Example:
+feat(ppc): use fetch-incomplete response in keyword ranking
+- Type the real POST /fetch-incomplete response (keywords_to_research).
+- Show "Nothing to fetch" and skip polling when there are 0 keywords to
+  research; otherwise toast the count and show it on completion instead
+  of the brand-wide total.
+- Move the component doc comment onto the component; update docs.`;
+
+// Strip wrappers some models add despite instructions (code fences, surrounding quotes, trailing whitespace).
+function cleanMessage(raw: string): string {
+  let msg = raw.trim();
+  msg = msg.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+  if ((msg.startsWith('"') && msg.endsWith('"')) || (msg.startsWith("'") && msg.endsWith("'"))) {
+    msg = msg.slice(1, -1).trim();
+  }
+  return msg.split("\n").map((l) => l.trimEnd()).join("\n");
+}
  
 function userPrompt(diff: string): string {
   return `Here is the staged git diff:\n\n${diff.slice(0, 12000)}`;
@@ -131,7 +155,7 @@ async function callOpenAiCompatible(
     }
    const msg= data.choices?.[0]?.message?.content?.trim();
     if (!msg) throw new Error(`No message returned. Raw response: ${JSON.stringify(data).slice(0, 500)}`);
-  return msg;
+  return cleanMessage(msg);
   }
 
 async function callGemini(apiKey: string, model: string, diff: string): Promise<string> {
@@ -141,7 +165,7 @@ async function callGemini(apiKey: string, model: string, diff: string): Promise<
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: `${SYSTEM_PROMPT}\n\n${userPrompt(diff)}` }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 300 },
+      generationConfig: { temperature: 0.3, maxOutputTokens: 800 },
     }),
   });
  
@@ -151,7 +175,7 @@ async function callGemini(apiKey: string, model: string, diff: string): Promise<
   }
   const msg = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!msg) throw new Error(`No message returned. Raw response: ${JSON.stringify(data).slice(0, 500)}`);
-  return msg;
+  return cleanMessage(msg);
 }
 
 

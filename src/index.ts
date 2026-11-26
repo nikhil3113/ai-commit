@@ -107,22 +107,50 @@ async function runConfigWizard(existing:Config | null): Promise<Config>{
     provider,
     apiKey,
     model: (model as string) || info.defaultModel,
-    baseUrl
+    baseUrl,
+    // Preserve any existing fallback unless the user explicitly changes/removes it
+    ...(existing?.fallback ? { fallback: existing.fallback } : {}),
   }
 
   saveConfig(config)
 
+  if (existing?.fallback) {
+    const f = existing.fallback
+    const action = await p.select({
+      message: `Fallback is set to ${PROVIDERS[f.provider].label} → ${f.model}. What do you want to do?`,
+      initialValue: "keep",
+      options: [
+        { value: "keep", label: "Keep current fallback" },
+        { value: "change", label: "Reconfigure fallback" },
+        { value: "remove", label: "Remove fallback" },
+      ],
+    })
 
-  const useFallback = await p.confirm({
-    message: "Configure a fallback provider for when the primary fails?",
-    initialValue: !!existing?.fallback,
-  })
+    if (!p.isCancel(action)) {
+      if (action === "change") {
+        const fallback = await runFallbackWizard(config)
+        if (fallback) {
+          config = { ...config, fallback }
+          saveConfig(config)
+        }
+      } else if (action === "remove") {
+        const { fallback: _removed, ...rest } = config
+        config = rest
+        saveConfig(config)
+      }
+    }
+  } else {
+    const useFallback = await p.confirm({
+      message: "Configure a fallback provider for when the primary fails?",
+      initialValue: false,
+    })
 
-  if (!p.isCancel(useFallback) && useFallback) {
-    const fallback = await runFallbackWizard(config)
-    if (fallback) {
-      config = {...config, fallback}
-      saveConfig(config)
+    if (!p.isCancel(useFallback) && useFallback) {
+      const fallback = await runFallbackWizard(config)
+      if (fallback) {
+        config = { ...config, fallback }
+        saveConfig(config)
+      }
     }
   }
   p.outro("Configuration saved to " + conifPath())

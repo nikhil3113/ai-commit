@@ -1,6 +1,8 @@
 import { Config } from "./config.js";
 
-export type ProviderName = "openrouter" | "groq" | "gemini" | "opencode" | "ollama" | "custom";
+import { randomUUID } from "node:crypto";
+
+export type ProviderName = "openrouter" | "groq" | "gemini" | "opencode" | "opencode-go" | "ollama" | "custom";
 
 
 export interface ProviderInfo {
@@ -47,6 +49,16 @@ export const PROVIDERS: Record<ProviderName, ProviderInfo> = {
     defaultBaseUrl: "https://opencode.ai/inference/openai/v1",
     keyUrl: "https://opencode.ai/console",
   },
+  "opencode-go": {
+    label: "OpenCode Go (subscription)",
+    // Only Go models served via chat-completions work here; minimax-m3, qwen*, claude-*, gpt-*, grok-*, gemini-* use other APIs.
+    // List: curl https://opencode.ai/inference/go/v1/models
+    hint: "Go subscription; chat-completions models like deepseek-v4.1-flash, kimi-k3, glm-5.3-flash",
+    needsApiKey: true,
+    defaultModel: "deepseek-v4.1-flash",
+    defaultBaseUrl: "https://opencode.ai/inference/go/openai/v1",
+    keyUrl: "https://opencode.ai/console",
+  },
   ollama: {
     label: "Ollama (local, no API key)",
     hint: "runs fully on your machine, requires Ollama running locally",
@@ -80,9 +92,14 @@ async function callOpenAiCompatible(
   baseUrl:string,
   apiKey:string | undefined,
   model:string,
-  diff:string
+  diff:string,
+  extraHeaders: Record<string, string> = {}
 ): Promise<string>{
-  const headers: Record<string, string> = {"Content-Type": "application/json"};
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "User-Agent": "ai-commit",
+    ...extraHeaders,
+  };
 
   if(apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
@@ -95,11 +112,20 @@ async function callOpenAiCompatible(
         {role:"system", content:SYSTEM_PROMPT},
         {role:"user", content:userPrompt(diff)}
       ],
-      temparature: 0.3,
+      temperature: 0.3,
     })
   })
 
-  const data = await res.json();
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`HTTP ${res.status} from ${baseUrl}: ${text.slice(0, 500)}`);
+  }
+  if (!res.ok && !data.error) {
+    throw new Error(`HTTP ${res.status} from ${baseUrl}: ${text.slice(0, 500)}`);
+  }
   if (data.error) {
     throw new Error(typeof data.error === "string" ? data.error : data.error.message || JSON.stringify(data.error));
     }
@@ -141,7 +167,11 @@ export async function generateCommitMessage(config: Config, diff:string): Promis
   const baseUrl= config.baseUrl || info.defaultBaseUrl
   if(!baseUrl) throw new Error(`Base URL is required for provider ${config.provider}`)
 
-  return callOpenAiCompatible(baseUrl, config.apiKey, model, diff)
+  // OpenCode Go requires a stable per-conversation session header from third-party clients
+  const extraHeaders: Record<string, string> =
+    config.provider === "opencode-go" ? { "x-opencode-session": randomUUID() } : {}
+
+  return callOpenAiCompatible(baseUrl, config.apiKey, model, diff, extraHeaders)
 }
 
 export function buildFallbackConfig(primary:Config): Config{

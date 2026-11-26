@@ -275,9 +275,17 @@ try {
   message = await generateCommitMessage(config, diff);
 } catch (error) {
   if (config.fallback) {
-    s.stop(`Primary provider ${PROVIDERS[config.provider].label} failed, trying fallback...`);
-    message = await generateCommitMessage(buildFallbackConfig(config), diff);
-    s.stop("Commit message generated using fallback provider.");
+    s.stop(`Primary provider ${PROVIDERS[config.provider].label} failed: ${(error as Error).message}`);
+    const fb = buildFallbackConfig(config);
+    s.start(`Trying fallback ${fb.provider}/${fb.model}...`);
+    try {
+      message = await generateCommitMessage(fb, diff);
+      s.stop("Commit message generated using fallback provider.");
+    } catch (fbError) {
+      s.stop("Fallback provider failed too: " + (fbError as Error).message);
+      p.outro("You can run 'ai-commit config' to reconfigure your providers and API keys.");
+      process.exit(1);
+    }
   } else {
     s.stop("Failed to generate commit message: " + (error as Error).message);
     p.log.error("Error details: " + (error as Error).stack);

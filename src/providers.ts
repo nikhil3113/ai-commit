@@ -1,6 +1,6 @@
 import { Config } from "./config.js";
 
-export type ProviderName = "openrouter" | "groq" | "gemini" | "ollama" | "custom";
+export type ProviderName = "openrouter" | "groq" | "gemini" | "opencode" | "ollama" | "custom";
 
 
 export interface ProviderInfo {
@@ -36,6 +36,16 @@ export const PROVIDERS: Record<ProviderName, ProviderInfo> = {
     needsApiKey: true,
     defaultModel: "gemini-1.5-flash",
     keyUrl: "https://aistudio.google.com/apikey",
+  },
+  opencode: {
+    label: "OpenCode Zen",
+    // Only Zen models served via /chat/completions work here (e.g. deepseek, kimi, glm, minimax, qwen3.8-max).
+    // gpt-*/claude-*/gemini-* models use other endpoints, and free-tier models only work inside OpenCode itself.
+    hint: "pay-as-you-go gateway; use chat/completions models like deepseek-v4.1-flash, kimi-k2.6, glm-5.3",
+    needsApiKey: true,
+    defaultModel: "deepseek-v4.1-flash",
+    defaultBaseUrl: "https://opencode.ai/inference/openai/v1",
+    keyUrl: "https://opencode.ai/console",
   },
   ollama: {
     label: "Ollama (local, no API key)",
